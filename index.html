@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>P2P Encrypted Chat — CSCI 3421</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; display: flex; flex-direction: column; }
+
+body {
+  font-family: 'Courier New', monospace;
+  background: #070d07;
+  color: #00cc66;
+  overflow: hidden;
+}
+
+/* Scanline overlay */
+body::after {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.025) 2px, rgba(0,0,0,0.025) 4px);
+}
+
+/* ── HEADER ─────────────────────────────────── */
+.header {
+  border-bottom: 1px solid #0d200d;
+  padding: 10px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: #040904; flex-shrink: 0;
+}
+.header-title {
+  font-size: 0.72rem; letter-spacing: 3px; text-transform: uppercase; color: #00cc66;
+}
+.header-title em { color: #ff4444; font-style: normal; }
+.header-right { font-size: 0.6rem; color: #1a3a1a; letter-spacing: 2px; }
+.header-right span { color: #336633; }
+
+/* ── DH HANDSHAKE BAR ───────────────────────── */
+.dh-bar {
+  background: #040904; border-bottom: 1px solid #0d200d;
+  padding: 6px 20px; display: flex; align-items: center; gap: 0;
+  overflow-x: auto; flex-shrink: 0;
+  scrollbar-width: none;
+}
+.dh-bar::-webkit-scrollbar { display: none; }
+.dh-item {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 0.6rem; white-space: nowrap; padding: 2px 14px;
+  border-right: 1px solid #0d200d;
+}
+.dh-item:first-child { padding-left: 0; }
+.dh-item:last-child  { border-right: none; }
+.dh-label { color: #335533; letter-spacing: 1px; }
+.dh-val   { color: #33aa55; }
+.dh-key   { color: #ffaa00; font-weight: bold; }
+.dh-ok    { color: #00ff88; }
+
+/* ── MAIN LAYOUT ────────────────────────────── */
+.main {
+  flex: 1; display: flex; overflow: hidden;
+}
+
+/* ── PEER PANEL ─────────────────────────────── */
+.peer-panel {
+  flex: 1; min-width: 200px; max-width: 420px;
+  display: flex; flex-direction: column;
+  border-right: 1px solid #0a1a0a;
+}
+
+.peer-header {
+  padding: 9px 14px;
+  background: #060d06; border-bottom: 1px solid #0a1a0a;
+  display: flex; align-items: center; gap: 9px; flex-shrink: 0;
+}
+.peer-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: #00cc66; box-shadow: 0 0 7px #00cc66;
+}
+.peer-name {
+  flex: 1; font-size: 0.75rem; letter-spacing: 4px; text-transform: uppercase;
+}
+.peer-badge {
+  font-size: 0.56rem; padding: 2px 7px;
+  border: 1px solid rgba(255,170,0,0.25);
+  color: #ffaa00; background: rgba(255,170,0,0.05);
+  letter-spacing: 1px;
+}
+
+.peer-log {
+  flex: 1; overflow-y: auto; padding: 10px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+  scrollbar-width: thin; scrollbar-color: #0d200d transparent;
+}
+.peer-log::-webkit-scrollbar { width: 3px; }
+.peer-log::-webkit-scrollbar-thumb { background: #0d200d; }
+
+/* Log entry types */
+.sys-msg {
+  font-size: 0.6rem; color: #2a4a2a; padding: 3px 0;
+  border-bottom: 1px dotted #0d200d;
+}
+.sys-msg.hi { color: #55aa55; }
+
+.msg-entry { font-size: 0.65rem; line-height: 1.55; }
+.msg-direction {
+  font-size: 0.55rem; letter-spacing: 3px; text-transform: uppercase;
+  color: #2a4a2a; margin-bottom: 3px;
+}
+.msg-block {
+  margin: 3px 0;
+}
+.msg-lbl {
+  font-size: 0.52rem; letter-spacing: 2px; text-transform: uppercase;
+  color: #1a3a1a; margin-bottom: 2px;
+}
+.msg-plain {
+  color: #00ff88; padding: 3px 8px;
+  background: rgba(0,255,136,0.04);
+  border-left: 2px solid #00cc66;
+  word-break: break-all;
+}
+.msg-enc {
+  color: #ff6644; padding: 3px 8px;
+  background: rgba(255,80,30,0.04);
+  border-left: 2px solid #cc3322;
+  word-break: break-all; font-size: 0.6rem;
+}
+
+/* ── PEER INPUT ─────────────────────────────── */
+.peer-input {
+  border-top: 1px solid #0a1a0a;
+  padding: 10px 14px; background: #050c05; flex-shrink: 0;
+}
+.input-row {
+  display: flex; gap: 6px; align-items: center; margin-bottom: 6px;
+}
+.peer-input input {
+  flex: 1; background: transparent; border: none;
+  border-bottom: 1px solid #1a3a1a; outline: none;
+  color: #00ff88; font-family: 'Courier New', monospace;
+  font-size: 0.7rem; padding: 4px 0;
+}
+.peer-input input::placeholder { color: #1a3a1a; }
+.to-select {
+  background: #060d06; border: 1px solid #1a3a1a;
+  color: #336633; font-family: 'Courier New', monospace;
+  font-size: 0.6rem; padding: 3px 6px; outline: none; cursor: pointer;
+}
+.send-btn {
+  background: transparent; border: 1px solid #336633;
+  color: #336633; font-family: 'Courier New', monospace;
+  font-size: 0.6rem; letter-spacing: 2px; padding: 4px 10px;
+  cursor: pointer; text-transform: uppercase; transition: all 0.15s;
+  white-space: nowrap;
+}
+.send-btn:hover { background: #00cc66; color: #040904; border-color: #00cc66; }
+.input-meta { font-size: 0.56rem; color: #1a3a1a; }
+.input-meta span { color: #ff6644; }
+
+/* ── NETWORK PANEL ──────────────────────────── */
+.network-panel {
+  width: 260px; flex-shrink: 0;
+  background: #050a08; border-left: 1px solid #0a1a12;
+  display: flex; flex-direction: column;
+}
+.net-header {
+  padding: 9px 14px; background: #040908;
+  border-bottom: 1px solid #0a1a12; flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 0.65rem; letter-spacing: 4px; text-transform: uppercase;
+  color: #ffaa00;
+}
+.net-blink {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #ffaa00; box-shadow: 0 0 6px #ffaa00;
+  animation: blink 1.4s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.net-log {
+  flex: 1; overflow-y: auto; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+  scrollbar-width: thin; scrollbar-color: #0a1a12 transparent;
+}
+.net-log::-webkit-scrollbar { width: 3px; }
+.net-log::-webkit-scrollbar-thumb { background: #0a1a12; }
+
+.packet-card {
+  border: 1px solid #0d1f14; padding: 8px 10px;
+  font-size: 0.6rem; line-height: 1.65;
+  animation: slideIn 0.25s ease;
+}
+@keyframes slideIn { from { opacity:0; transform: translateX(8px); } }
+.pkt-route { margin-bottom: 4px; font-size: 0.62rem; }
+.pkt-arrow { color: #ffaa00; }
+.pkt-row { color: #2a4a2a; }
+.pkt-row span { color: #556655; }
+.pkt-hex-lbl { color: #1a3a1a; font-size: 0.52rem; letter-spacing: 2px; text-transform: uppercase; margin-top: 4px; }
+.pkt-hex { color: #ff6644; word-break: break-all; }
+.net-sys { font-size: 0.6rem; color: #1a3a1a; padding: 2px 0; }
+.net-sys.hi { color: #336633; }
+
+/* ── FOOTER ─────────────────────────────────── */
+.footer {
+  border-top: 1px solid #0d200d; padding: 7px 20px;
+  background: #040904; display: flex; align-items: center; gap: 16px;
+  flex-shrink: 0;
+}
+.add-btn {
+  background: transparent; border: 1px solid #1a3a1a;
+  color: #336633; font-family: 'Courier New', monospace;
+  font-size: 0.62rem; letter-spacing: 2px; padding: 5px 14px;
+  cursor: pointer; text-transform: uppercase; transition: all 0.15s;
+  display: flex; align-items: center; gap: 7px;
+}
+.add-btn:hover:not(:disabled) { border-color: #00cc66; color: #00cc66; }
+.add-btn:disabled { opacity: 0.3; cursor: default; }
+.footer-stats { font-size: 0.58rem; color: #1a3a1a; }
+.footer-stats span { color: #2a4a2a; }
+.footer-legend {
+  margin-left: auto; font-size: 0.56rem;
+  display: flex; gap: 14px; color: #1a3a1a;
+}
+.leg-enc { color: #cc3322; }
+.leg-dec { color: #00cc66; }
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────── -->
+<div class="header">
+  <div class="header-title">
+    P2P Encrypted Chat <em>//</em> CSCI 3421 <em>—</em> Data Communications &amp; Networking
+  </div>
+  <div class="header-right">
+    cipher: <span>XOR-PSK</span> &nbsp;·&nbsp; key exchange: <span>DIFFIE-HELLMAN</span> &nbsp;·&nbsp; transport: <span>SIMULATED TCP</span>
+  </div>
+</div>
+
+<!-- ── DH KEY EXCHANGE BAR ─────────────────────────── -->
+<div class="dh-bar" id="dhBar">
+  <div class="dh-item"><span class="dh-label">DH PARAMS:</span> <span class="dh-val" id="dhParams">computing...</span></div>
+  <div class="dh-item"><span class="dh-label">PEER A pub:</span> <span class="dh-val" id="dhPubA">—</span></div>
+  <div class="dh-item"><span class="dh-label">PEER B pub:</span> <span class="dh-val" id="dhPubB">—</span></div>
+  <div class="dh-item"><span class="dh-label">SHARED SECRET:</span> <span class="dh-key" id="dhSecret">—</span></div>
+  <div class="dh-item"><span class="dh-label">SESSION KEY:</span> <span class="dh-key" id="dhKey">—</span></div>
+  <div class="dh-item"><span class="dh-ok" id="dhStatus">● NEGOTIATING...</span></div>
+</div>
+
+<!-- ── MAIN ────────────────────────────────────────── -->
+<div class="main" id="mainArea">
+  <!-- peer panels injected here -->
+  <div class="network-panel">
+    <div class="net-header"><div class="net-blink"></div> NETWORK INTERCEPT</div>
+    <div class="net-log" id="netLog">
+      <div class="net-sys">// Packet capture active...</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── FOOTER ──────────────────────────────────────── -->
+<div class="footer">
+  <button class="add-btn" id="addBtn">＋ ADD PEER</button>
+  <div class="footer-stats">
+    peers: <span id="peerCount">0</span> &nbsp;·&nbsp;
+    packets: <span id="pktCount">0</span> &nbsp;·&nbsp;
+    bytes enc: <span id="byteCount">0</span>
+  </div>
+  <div class="footer-legend">
+    <span class="leg-enc">■ ENCRYPTED</span>
+    <span class="leg-dec">■ PLAINTEXT</span>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  DIFFIE-HELLMAN (real math, small numbers for display)
+// ═══════════════════════════════════════════════════════
+const p = 23, g = 5;
+
+function modPow(base, exp, mod) {
+  let result = 1; base %= mod;
+  while (exp > 0) {
+    if (exp % 2 === 1) result = (result * base) % mod;
+    exp = Math.floor(exp / 2);
+    base = (base * base) % mod;
+  }
+  return result;
+}
+
+const privA   = Math.floor(Math.random() * 8) + 2;
+const privB   = Math.floor(Math.random() * 8) + 2;
+const pubA    = modPow(g, privA, p);
+const pubB    = modPow(g, privB, p);
+const secretA = modPow(pubB, privA, p);   // A computes shared secret
+const secretB = modPow(pubA, privB, p);   // B computes same secret
+// secretA === secretB (DH property)
+const SESSION_KEY = secretA.toString(16).padStart(2,'0').repeat(4);
+
+// ═══════════════════════════════════════════════════════
+//  XOR CIPHER
+// ═══════════════════════════════════════════════════════
+function xorEncrypt(text, key) {
+  const bytes = [];
+  for (let i = 0; i < text.length; i++) {
+    bytes.push(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  }
+  return bytes;
+}
+
+function xorDecrypt(bytes, key) {
+  return bytes.map((b, i) =>
+    String.fromCharCode(b ^ key.charCodeAt(i % key.length))
+  ).join('');
+}
+
+function toHex(bytes) {
+  return bytes.map(b => b.toString(16).padStart(2,'0')).join(' ');
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ═══════════════════════════════════════════════════════
+//  PEER MANAGEMENT
+// ═══════════════════════════════════════════════════════
+const NAMES  = ['ALICE','BOB','CAROL','DAVE','EVE','FRANK'];
+const COLORS = ['#00ff88','#4488ff','#ff88cc','#ffcc00','#ff8844','#88ffcc'];
+
+let peers    = [];
+let seqNum   = 0;
+let pktCount = 0;
+let bytesEnc = 0;
+
+function getPeer(name) { return peers.find(p => p.name === name); }
+
+function addPeer(name, color) {
+  peers.push({ name, color });
+
+  const netPanel = document.querySelector('.network-panel');
+  const div = document.createElement('div');
+  div.className = 'peer-panel';
+  div.id = 'panel-' + name;
+  div.innerHTML = `
+    <div class="peer-header">
+      <div class="peer-dot"></div>
+      <div class="peer-name" style="color:${color}">${name}</div>
+      <div class="peer-badge">KEY: ${SESSION_KEY}</div>
+    </div>
+    <div class="peer-log" id="log-${name}">
+      <div class="sys-msg hi">// ${name} online — session key accepted</div>
+    </div>
+    <div class="peer-input">
+      <div class="input-row">
+        <input id="inp-${name}" type="text" placeholder="Type a message...">
+        <select class="to-select" id="sel-${name}"></select>
+        <button class="send-btn" onclick="send('${name}')">SEND</button>
+      </div>
+      <div class="input-meta">xor key: <span>${SESSION_KEY}</span></div>
+    </div>
+  `;
+  netPanel.before(div);
+
+  div.querySelector(`#inp-${name}`).addEventListener('keydown', e => {
+    if (e.key === 'Enter') send(name);
+  });
+
+  refreshSelects();
+  document.getElementById('peerCount').textContent = peers.length;
+
+  // Notify others
+  peers.forEach(q => {
+    if (q.name !== name) {
+      logSys(q.name, `// ${name} joined the network`);
+    }
+  });
+  netSys(`// Peer ${name} connected · DH key accepted · XOR session active`);
+}
+
+function refreshSelects() {
+  peers.forEach(p => {
+    const sel = document.getElementById('sel-' + p.name);
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = peers
+      .filter(q => q.name !== p.name)
+      .map(q => `<option value="${q.name}" ${q.name===cur?'selected':''}>${q.name}</option>`)
+      .join('');
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  SEND MESSAGE
+// ═══════════════════════════════════════════════════════
+function send(fromName) {
+  const inp = document.getElementById('inp-' + fromName);
+  const sel = document.getElementById('sel-' + fromName);
+  const text = inp.value.trim();
+  if (!text || !sel?.value) return;
+  const toName = sel.value;
+  inp.value = '';
+
+  const encBytes = xorEncrypt(text, SESSION_KEY);
+  const hexStr   = toHex(encBytes);
+  seqNum++;
+  pktCount++;
+  bytesEnc += encBytes.length;
+
+  const fromPeer = getPeer(fromName);
+
+  // ── Sender log ──
+  logEntry(fromName, {
+    dir: `▶ SENT → ${toName}`,
+    plain: text,
+    enc: hexStr
+  });
+
+  // ── Network packet ──
+  netPacket({
+    from: fromName, to: toName,
+    color: fromPeer?.color || '#ffaa00',
+    seq: seqNum, len: text.length,
+    hex: hexStr
+  });
+
+  // ── Receiver log (delay = packet travel time) ──
+  setTimeout(() => {
+    const decrypted = xorDecrypt(encBytes, SESSION_KEY);
+    logEntry(toName, {
+      dir: `◀ RECV ← ${fromName}`,
+      enc: hexStr,
+      plain: decrypted,
+      recv: true
+    });
+  }, 420);
+
+  document.getElementById('pktCount').textContent = pktCount;
+  document.getElementById('byteCount').textContent = bytesEnc;
+}
+
+// ═══════════════════════════════════════════════════════
+//  DOM HELPERS
+// ═══════════════════════════════════════════════════════
+function logEntry(name, { dir, plain, enc, recv }) {
+  const log = document.getElementById('log-' + name);
+  if (!log) return;
+
+  const html = recv
+    ? `<div class="msg-entry">
+        <div class="msg-direction">${escHtml(dir)}</div>
+        <div class="msg-block">
+          <div class="msg-lbl">encrypted (intercepted)</div>
+          <div class="msg-enc">${escHtml(enc)}</div>
+        </div>
+        <div class="msg-block">
+          <div class="msg-lbl">▼ xor decrypted</div>
+          <div class="msg-plain">${escHtml(plain)}</div>
+        </div>
+       </div>`
+    : `<div class="msg-entry">
+        <div class="msg-direction">${escHtml(dir)}</div>
+        <div class="msg-block">
+          <div class="msg-lbl">plaintext</div>
+          <div class="msg-plain">${escHtml(plain)}</div>
+        </div>
+        <div class="msg-block">
+          <div class="msg-lbl">▼ xor encrypted → wire</div>
+          <div class="msg-enc">${escHtml(enc)}</div>
+        </div>
+       </div>`;
+
+  log.insertAdjacentHTML('beforeend', html);
+  log.scrollTop = log.scrollHeight;
+}
+
+function logSys(name, msg) {
+  const log = document.getElementById('log-' + name);
+  if (!log) return;
+  log.insertAdjacentHTML('beforeend', `<div class="sys-msg">${escHtml(msg)}</div>`);
+  log.scrollTop = log.scrollHeight;
+}
+
+function netPacket({ from, to, color, seq, len, hex }) {
+  const log = document.getElementById('netLog');
+  log.insertAdjacentHTML('beforeend', `
+    <div class="packet-card">
+      <div class="pkt-route" style="color:${color}">
+        ${from} <span class="pkt-arrow">──▶</span> ${to}
+      </div>
+      <div class="pkt-row">SEQ: <span>${seq}</span> &nbsp; LEN: <span>${len}B</span> &nbsp; TYPE: <span>DATA</span></div>
+      <div class="pkt-row">CIPHER: <span>XOR-PSK</span> &nbsp; KEY: <span>${SESSION_KEY}</span></div>
+      <div class="pkt-hex-lbl">payload (hex-encoded):</div>
+      <div class="pkt-hex">${escHtml(hex)}</div>
+    </div>
+  `);
+  log.scrollTop = log.scrollHeight;
+}
+
+function netSys(msg) {
+  const log = document.getElementById('netLog');
+  log.insertAdjacentHTML('beforeend', `<div class="net-sys hi">${escHtml(msg)}</div>`);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════
+//  ADD PEER BUTTON
+// ═══════════════════════════════════════════════════════
+let nextPeer = 0;
+document.getElementById('addBtn').addEventListener('click', () => {
+  if (nextPeer >= NAMES.length) return;
+  addPeer(NAMES[nextPeer], COLORS[nextPeer]);
+  nextPeer++;
+  if (nextPeer >= NAMES.length) {
+    const btn = document.getElementById('addBtn');
+    btn.disabled = true;
+    btn.textContent = 'MAX PEERS';
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+//  INIT — boot sequence
+// ═══════════════════════════════════════════════════════
+// Show DH exchange in bar (animated reveal)
+document.getElementById('dhParams').textContent  = `p=${p}, g=${g}`;
+setTimeout(() => document.getElementById('dhPubA').textContent    = pubA,      200);
+setTimeout(() => document.getElementById('dhPubB').textContent    = pubB,      400);
+setTimeout(() => document.getElementById('dhSecret').textContent  = secretA,   700);
+setTimeout(() => document.getElementById('dhKey').textContent     = SESSION_KEY, 900);
+setTimeout(() => {
+  document.getElementById('dhStatus').textContent = '● SECURE CHANNEL ESTABLISHED';
+}, 1100);
+
+// Start with Alice + Bob
+addPeer(NAMES[0], COLORS[0]); nextPeer++;
+addPeer(NAMES[1], COLORS[1]); nextPeer++;
+
+// Boot messages in network panel
+setTimeout(() => netSys(`// DH shared secret verified: A=${secretA}, B=${secretB}`), 500);
+setTimeout(() => netSys(`// Session key derived: ${SESSION_KEY}`), 900);
+setTimeout(() => netSys(`// Mesh ready. Monitoring all packets in plaintext equivalent...`), 1400);
+</script>
+</body>
+</html>
